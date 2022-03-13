@@ -38,6 +38,14 @@ data H a = H (P a) (Q a) deriving (Eq, Show, Functor, Foldable, Traversable)
 hamiltonian :: Floating a => H a -> a
 hamiltonian (H p q) = normSq p / 2 - (1 / norm q)
 
+-- dHdt :: Floating a => H a -> (V a, V a)
+-- dHdt h = (- dq, dp)
+--   where
+--     (H dp dq) = dH h
+
+dH :: Floating b => H b -> H b
+dH = snd . grad hamiltonian
+
 kepler :: [H Double]
 kepler = steps n h hh0
   where
@@ -73,10 +81,11 @@ stepIO h h0@(H p0 q0) = do
     q1 = q0 + pure h * p''
     h2 = H p1 q1
   say "h0" h0
-  say "dh1" dh1
+  -- say "dh1" dh1
+  say "q'" q'
   say "p1" p1
   say "h1" h1
-  say "dh2" dh2
+  say "dh2 = dH h1" dh2
   say "q1" q1
   say "H'" h2 >> putStrLn ""
   pure h2
@@ -84,7 +93,7 @@ stepIO h h0@(H p0 q0) = do
 keplerIO :: IO [H Double]
 keplerIO = stepsIO n h hh0
   where
-    n = 10
+    n = 3
     h = pi / 240
 
 stepsIO :: (Show a, Floating a) => Int -> a -> H a -> IO [H a]
@@ -104,14 +113,5 @@ iterateN n f x0 = go 0 x0 []
 say :: Show a => String -> a -> IO ()
 say s x = putStrLn $ unwords [s, ":", show x]
   
--- dHdt :: Floating a => H a -> (V a, V a)
--- dHdt h = (- dq, dp)
---   where
---     (H dp dq) = dH h
-
-dH :: Floating b => H b -> H b
-dH = snd . grad hamiltonian
 
 
-ftest :: Floating a => [a] -> a
-ftest = recip . sum

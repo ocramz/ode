@@ -35,7 +35,11 @@ type Q = V
 
 data H a = H (P a) (Q a) deriving (Eq, Show, Functor, Foldable, Traversable)
 
--- https://courses.seas.harvard.edu/courses/am225/notes/am225_symplectic.pdf
+-- | Hamiltonian of a point mass orbiting a much larger mass
+--
+-- taken from https://courses.seas.harvard.edu/courses/am225/notes/am225_symplectic.pdf
+--
+-- NB : it's a linearly separable function of position and momentum
 hamiltonian :: Floating a => H a -> a
 hamiltonian (H p q) = tt p + uu q --  normSq p / 2 - (1 / norm q)
 
@@ -52,10 +56,8 @@ dHa :: Floating a => H a -> H a
 dHa = AD.grad hamiltonian
 
 -- analytical derivatives of the hamiltonian
--- dHdp :: H a -> V a
--- dHdp (H p _) = p
 
--- dHdq :: Floating b => H b -> V b
+-- | dH / dq
 dHdq :: Floating b => V b -> V b
 dHdq q = fmap f q
   where
@@ -65,7 +67,7 @@ dHdq q = fmap f q
 kepler :: [H Double]
 kepler = steps n h hh0
   where
-    n = 10
+    n = 2
     h = 0.001 -- pi / 240
 
 hh0 :: H Double
@@ -101,16 +103,16 @@ stepIO h h0@(H p0 q0) = do
   say "dU/dq | H = H_0" dUdq
   say "p_1/2" p1
   say "H_1/2" h1
-  -- say "dh2 = dH h1" dh2
-  say "dT/dp | H = H_1/2" dTdp
-  say "q1" q1
+  -- -- say "dh2 = dH h1" dh2
+  -- say "dT/dp | H = H_1/2" dTdp
+  -- say "q1" q1
   say "H_1" h2 >> putStrLn ""
   pure h2
 
 keplerIO :: IO [H Double]
 keplerIO = stepsIO n h hh0
   where
-    n = 10
+    n = 3
     h = 0.001 -- pi / 240
 
 stepsIO :: (Show a, Floating a) => Int -> a -> H a -> IO [H a]

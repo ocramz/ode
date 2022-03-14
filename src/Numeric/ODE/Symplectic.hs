@@ -1,7 +1,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DeriveFunctor #-}
-{-# options_ghc -Wno-unused-imports #-}
+{-# options_ghc -Wno-unused-imports -Wno-type-defaults #-}
 -- | Symplectic integration of ODEs
 module Numeric.ODE.Symplectic where
 
@@ -18,6 +18,8 @@ import qualified Data.ByteString.Builder as BSB (Builder, toLazyByteString, hPut
 import qualified Data.ByteString.Internal as BS (c2w)
 import qualified Data.ByteString.Char8 as BS8 (pack)
 
+import Numeric.ODE.Vec (V(..), norm, normSq, vecCsvBuilder, vecCsvHeader)
+
 renderCSV :: IO ()
 renderCSV = do
   let
@@ -26,52 +28,17 @@ renderCSV = do
   bsbWriteFile "symplectic1.csv" csv1
   bsbWriteFile "symplectic2.csv" csv2
   where
-    n = 100
+    n = 10
     h = 0.001
-    rows1 = iterateN n (step h) hh0
-    rows2 = iterateN n (stormerVerlet h) hh0
+    rows1 = iterateN n (sympl1Step h) hh0
+    rows2 = iterateN n (svKepler h) hh0
     toCsv rs = foldMap (vecCsvBuilder . getP) rs
-
 
 bsbWriteFile :: FilePath -> BSB.Builder -> IO ()
 bsbWriteFile = modifyFile WriteMode
 modifyFile :: IOMode -> FilePath -> BSB.Builder -> IO ()
 modifyFile mode f bld = withBinaryFile f mode (`BSB.hPutBuilder` bld)
--- | CSV Header
-vecCsvHeader :: BSB.Builder
-vecCsvHeader = csvBuild BSB.string8 ["X", "Y"]
--- | CSV data row
-vecCsvBuilder :: V Double -> BSB.Builder
-vecCsvBuilder (V v0x v0y) =
-  csvBuild BSB.doubleDec [v0x, v0y]
 
-csvBuild :: (t -> BSB.Builder) -> [t] -> BSB.Builder
-csvBuild _ [] = mempty
-csvBuild bfun (w:ws) = bfun w <> go ws
-  where
-    go (m:ms) = BSB.string8 "," <> bfun m <> go ms
-    go [] = BSB.string8 "\n"
-
-
-data V a = V a a deriving (Eq, Show, Functor, Foldable, Traversable)
-instance Applicative V where
-  pure x = V x x
-  V fx fy <*> V x y  = V (fx x) (fy y)
-instance Num a => Num (V a) where
-  fromInteger x = let i = fromInteger x in V i i
-  (+) = zipWithV (+)
-  (*) = zipWithV (*)
-  (-) = zipWithV (-)
-  negate = fmap negate
-  abs = fmap abs
-  signum = fmap signum
-
-zipWithV :: (t -> t -> a) -> V t -> V t -> V a
-zipWithV f (V x1 y1) (V x2 y2) = V (f x1 x2) (f y1 y2)
-
-normSq, norm :: Floating a => V a -> a
-normSq (V x y) = x**2 + y**2
-norm = sqrt . normSq
 
 type P = V
 type Q = V
@@ -93,6 +60,12 @@ tt p = normSq p / 2
 uu :: Floating a => V a -> a
 uu q = - 1 / norm q
 
+dtt, duu :: Floating a => V a -> V a
+dtt = AD.grad tt
+duu = AD.grad uu
+-- dtt = snd . grad tt
+-- duu = snd . grad uu
+
 -- | Gradient of the Hamiltonian
 dH :: Floating b => H b -> H b
 dH = snd . grad hamiltonian
@@ -111,40 +84,25 @@ dHdq q = fmap f q
     f s = s / den
     den = norm q ** 3
 
+svKepler :: Floating a => a -> H a -> H a
+svKepler h = stormerVerlet2H h duu dtt
 
-stormerVerlet :: Floating a => a -> H a -> H a
-stormerVerlet hh h@(H psPrev qsPrev) = H pNew qNew
-  where
-    h2 = hh / 2
-    (H _ dq) = dHa h
-    pp2 = psPrev - pure h2 * dq
-    h05 = (H pp2 qsPrev)
-    (H dp05 _) = dHa h05
-    qNew = qsPrev + pure hh * dp05
-    h1 = (H pp2 qNew)
-    (H _ dq1) = dHa h1
-    pNew = pp2 - pure h2 * dq1
-
-
--- -- | Störmer-Verlet integration scheme for separable Hamiltonians
+-- | Störmer-Verlet integration scheme for separable Hamiltonians
 -- from https://hackage.haskell.org/package/numeric-ode-0.0.0.0/docs/src/Math-Integrators-StormerVerlet.html#stormerVerlet2H
-
--- stormerVerlet2H :: (Applicative f, Num (f a), Fractional a) =>
---               a            -- ^ Step size
---            -> (f a -> f a) -- ^ \(\frac{\partial H}{\partial q}\)
---            -> (f a -> f a) -- ^ \(\frac{\partial H}{\partial p}\)
---            -> V2 (f a)     -- ^ Current \((p, q)\) as a 2-dimensional vector
---            -> V2 (f a)     -- ^ New \((p, q)\) as a 2-dimensional vector
--- stormerVerlet2H hh nablaQ nablaP prev = V2 qNew pNew
---   where
---     h2   = hh / 2
---     hhs  = pure hh
---     hh2s = pure h2
---     qsPrev = prev ^. _x
---     psPrev = prev ^. _y
---     pp2  = psPrev - hh2s * nablaQ qsPrev
---     qNew = qsPrev + hhs * nablaP pp2
---     pNew = pp2 - hh2s * nablaQ qNew
+stormerVerlet2H :: Fractional a =>
+                   a -- ^ step size
+                -> (Q a -> V a) -- ^ \(\frac{\partial H}{\partial q}\)
+                -> (P a -> V a) -- ^ \(\frac{\partial H}{\partial p}\)
+                -> H a -- ^ current Hamiltonian
+                -> H a -- ^ updated Hamiltonian
+stormerVerlet2H hh nablaQ nablaP (H psPrev qsPrev) = H pNew qNew
+  where
+    h2   = hh / 2
+    hhs  = pure hh
+    hh2s = pure h2
+    pp2  = psPrev - hh2s * nablaQ qsPrev
+    qNew = qsPrev + hhs * nablaP pp2
+    pNew = pp2 - hh2s * nablaQ qNew
 
 
 
@@ -161,11 +119,11 @@ hh0 = H p0 q0
     q0 = V (4/3) 0
 
 steps :: Floating a => Int -> a -> H a -> [H a]
-steps n h = take n . iterate (step h)
+steps n h = take n . iterate (sympl1Step h)
 
 -- | first order symplectic
-step :: Floating a => a -> H a -> H a
-step h h0@(H p0 q0) = H p1 q1
+sympl1Step :: Floating a => a -> H a -> H a
+sympl1Step h h0@(H p0 q0) = H p1 q1
   where
     (H _ q') = dHa h0 -- gradient of current H.
     p1 = p0 - pure h * q' -- update P
